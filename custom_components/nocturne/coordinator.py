@@ -95,10 +95,20 @@ class GlucoseCoordinator(NocturneCoordinator):
         self.async_update_listeners()
 
     async def _async_fetch(self) -> dict[str, Any]:
-        return {
+        aps = await self.client.get_latest_aps_snapshot()
+        data = {
             "glucose": await self.client.get_latest_glucose(),
-            "aps": await self.client.get_latest_aps_snapshot(),
+            "aps": aps,
+            "summary": None,
+            "temp_basal": None,
+            "temp_target": await self.client.get_latest_temp_target(),
         }
+        if aps is None:
+            # A pump that runs its own algorithm (CareLink, Tandem) leaves no APS snapshot:
+            # IOB and COB come from what Nocturne computes, the rate from the pump's own basal.
+            data["summary"] = await self.client.get_summary()
+            data["temp_basal"] = await self.client.get_latest_temp_basal()
+        return data
 
 
 class DeviceCoordinator(NocturneCoordinator):

@@ -34,6 +34,7 @@ class TestSensorSetupEntry:
             "sensor.nocturne_active_basal_rate": STATE_UNAVAILABLE,
             "sensor.nocturne_pump_reservoir": STATE_UNAVAILABLE,
             "sensor.nocturne_pump_battery": STATE_UNAVAILABLE,
+            "sensor.nocturne_pump_mode": STATE_UNAVAILABLE,
             "sensor.nocturne_cgm_battery": "90",
             "sensor.nocturne_sensor_age": "5",
             "sensor.nocturne_time_in_range": "72.5",
@@ -59,7 +60,7 @@ class TestSensorRegistration:
         devices = dr.async_get(reauth_hass)
         for entry in (first, second):
             registered = er.async_entries_for_config_entry(entities, entry.entry_id)
-            assert len(registered) == 12
+            assert len(registered) == 14
             assert all(e.unique_id.startswith(f"{entry.entry_id}_") for e in registered)
             assert {e.device_id for e in registered} == {
                 devices.async_get_device({(DOMAIN, entry.entry_id)}).id

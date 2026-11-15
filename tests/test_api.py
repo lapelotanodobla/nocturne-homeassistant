@@ -209,3 +209,20 @@ class TestGetDailySummaryToday:
             await client.get_daily_summary(TODAY)
             await client.get_daily_summary(TODAY)
         assert caplog.text.count("reports.read") == 1
+
+
+class TestGetLatestTempTargetScope:
+    async def test_forbidden_returns_none(self, client):
+        with patch("custom_components.nocturne.api.StateSpansApi") as mock_api_cls:
+            mock_api_cls.return_value.state_spans_get_state_spans.side_effect = ApiException(
+                status=403, reason="Forbidden"
+            )
+            assert await client.get_latest_temp_target() is None
+
+    async def test_other_errors_propagate(self, client):
+        with patch("custom_components.nocturne.api.StateSpansApi") as mock_api_cls:
+            mock_api_cls.return_value.state_spans_get_state_spans.side_effect = ApiException(
+                status=500, reason="Server Error"
+            )
+            with pytest.raises(ApiException):
+                await client.get_latest_temp_target()

@@ -44,7 +44,10 @@ async def test_diagnostics_report_health_for_a_set_up_entry(
 
     assert result["signalr_connected"] is True
     assert result["coordinators"] == {
-        "glucose": {"last_update_success": True, "data_keys": ["aps", "glucose"]},
+        "glucose": {
+            "last_update_success": True,
+            "data_keys": ["aps", "glucose", "summary", "temp_basal", "temp_target"],
+        },
         "device": {
             "last_update_success": True,
             "data_keys": ["daily_summary", "profile", "pump", "sensor_age", "uploader"],

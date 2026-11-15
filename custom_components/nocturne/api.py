@@ -31,15 +31,19 @@ from nocturne_py import (
     SensorGlucose,
     SensorGlucoseApi,
     StateSpan,
+    StateSpanCategory,
     StateSpansApi,
     StatusApi,
+    SummaryApi,
+    TempBasal,
+    TempBasalApi,
     UploaderSnapshot,
     UploaderSnapshotApi,
     UpsertMeterGlucoseRequest,
     UpsertSensorGlucoseRequest,
 )
 from nocturne_py.exceptions import OpenApiException
-from nocturne_py.models import DailySummaryDay, ProfileSummary
+from nocturne_py.models import DailySummaryDay, ProfileSummary, V4SummaryResponse
 from urllib3.exceptions import HTTPError
 
 from .auth import TokenProvider
@@ -121,6 +125,55 @@ class NocturneApiClient:
             with self._client() as client:
                 api = PumpSnapshotApi(client)
                 resp = api.pump_snapshot_get_all(limit=1, sort="timestamp_desc")
+                if resp.data:
+                    return resp.data[0]
+                return None
+
+        return await asyncio.to_thread(_call)
+
+    async def get_latest_temp_target(self) -> StateSpan | None:
+        """Fetch the most recent temporary target span, running or not.
+
+        Returns None when the token may not read temporary targets, so an entry
+        authorized before treatments were in scope keeps its other sensors.
+        """
+        await self._ensure_token()
+
+        def _call() -> StateSpan | None:
+            with self._client() as client:
+                api = StateSpansApi(client)
+                resp = api.state_spans_get_state_spans(
+                    category=StateSpanCategory.TEMPORARYTARGET, limit=1, sort="timestamp_desc"
+                )
+                if resp.data:
+                    return resp.data[0]
+                return None
+
+        try:
+            return await asyncio.to_thread(_call)
+        except ApiException as err:
+            if err.status == 403:
+                _LOGGER.debug("Token may not read temporary targets: %s", err)
+                return None
+            raise
+
+    async def get_summary(self) -> V4SummaryResponse | None:
+        """Fetch the current summary: the IOB and COB Nocturne computes from treatments."""
+        await self._ensure_token()
+
+        def _call() -> V4SummaryResponse | None:
+            with self._client() as client:
+                return SummaryApi(client).summary_get_summary()
+
+        return await asyncio.to_thread(_call)
+
+    async def get_latest_temp_basal(self) -> TempBasal | None:
+        """Fetch the most recent temp basal."""
+        await self._ensure_token()
+
+        def _call() -> TempBasal | None:
+            with self._client() as client:
+                resp = TempBasalApi(client).temp_basal_get_all(limit=1, sort="timestamp_desc")
                 if resp.data:
                     return resp.data[0]
                 return None

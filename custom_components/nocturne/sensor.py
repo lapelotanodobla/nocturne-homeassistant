@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -18,9 +19,39 @@ from homeassistant.helpers.update_coordinator import (
     CoordinatorEntity,
     DataUpdateCoordinator,
 )
+from homeassistant.util import dt as dt_util
 
 from . import NocturneConfigEntry
 from .const import DOMAIN
+
+# How long past its end the latest temp basal still counts as the running rate: CareLink
+# reports each 5-minute auto-basal dose 5 to 10 minutes late.
+TEMP_BASAL_GRACE = timedelta(minutes=15)
+
+
+def _iob(d: dict[str, Any]) -> float | None:
+    if d.get("aps"):
+        return d["aps"].iob
+    return d["summary"].iob if d.get("summary") else None
+
+
+def _cob(d: dict[str, Any]) -> float | None:
+    if d.get("aps"):
+        return d["aps"].cob
+    return d["summary"].cob if d.get("summary") else None
+
+
+def _basal_rate(d: dict[str, Any]) -> float | None:
+    if d.get("aps"):
+        return d["aps"].enacted_rate
+    basal = d.get("temp_basal")
+    if basal is None or basal.end_timestamp is None:
+        return None
+    end = basal.end_timestamp
+    if end.tzinfo is None:
+        end = end.replace(tzinfo=dt_util.UTC)
+    return basal.rate if dt_util.utcnow() - end <= TEMP_BASAL_GRACE else None
+
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -66,8 +97,8 @@ GLUCOSE_SENSORS: list[NocturneSensorDescription] = [
         state_class=SensorStateClass.MEASUREMENT,
         icon="mdi:needle",
         coordinator_key="glucose",
-        value_fn=lambda d: d["aps"].iob if d.get("aps") else None,
-        available_fn=lambda d: d.get("aps") is not None and d["aps"].iob is not None,
+        value_fn=_iob,
+        available_fn=lambda d: _iob(d) is not None,
     ),
     NocturneSensorDescription(
         key="cob",
@@ -76,8 +107,8 @@ GLUCOSE_SENSORS: list[NocturneSensorDescription] = [
         state_class=SensorStateClass.MEASUREMENT,
         icon="mdi:food-apple",
         coordinator_key="glucose",
-        value_fn=lambda d: d["aps"].cob if d.get("aps") else None,
-        available_fn=lambda d: d.get("aps") is not None and d["aps"].cob is not None,
+        value_fn=_cob,
+        available_fn=lambda d: _cob(d) is not None,
     ),
     NocturneSensorDescription(
         key="predicted_bg",
@@ -110,8 +141,8 @@ GLUCOSE_SENSORS: list[NocturneSensorDescription] = [
         state_class=SensorStateClass.MEASUREMENT,
         icon="mdi:iv-bag",
         coordinator_key="glucose",
-        value_fn=lambda d: d["aps"].enacted_rate if d.get("aps") else None,
-        available_fn=lambda d: d.get("aps") is not None and d["aps"].enacted_rate is not None,
+        value_fn=_basal_rate,
+        available_fn=lambda d: _basal_rate(d) is not None,
     ),
 ]
 
@@ -136,6 +167,14 @@ DEVICE_SENSORS: list[NocturneSensorDescription] = [
         coordinator_key="device",
         value_fn=lambda d: d["pump"].battery_percent if d.get("pump") else None,
         available_fn=lambda d: d.get("pump") is not None and d["pump"].battery_percent is not None,
+    ),
+    NocturneSensorDescription(
+        key="pump_mode",
+        translation_key="pump_mode",
+        icon="mdi:auto-mode",
+        coordinator_key="device",
+        value_fn=lambda d: d["pump"].pump_mode if d.get("pump") else None,
+        available_fn=lambda d: d.get("pump") is not None and d["pump"].pump_mode is not None,
     ),
     NocturneSensorDescription(
         key="cgm_battery",

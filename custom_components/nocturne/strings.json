@@ -46,6 +46,11 @@
     }
   },
   "entity": {
+    "binary_sensor": {
+      "temp_target": {
+        "name": "Temp Target"
+      }
+    },
     "sensor": {
       "current_glucose": {
         "name": "Current Glucose"
@@ -73,6 +78,9 @@
       },
       "pump_battery": {
         "name": "Pump Battery"
+      },
+      "pump_mode": {
+        "name": "Pump Mode"
       },
       "cgm_battery": {
         "name": "CGM Battery"

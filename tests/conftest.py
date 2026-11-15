@@ -135,6 +135,9 @@ def make_api_client() -> AsyncMock:
     client.get_profile_summary.return_value = ProfileSummary()
     client.get_daily_summary.return_value = DailySummaryDay(time_in_range_percent=72.5)
     client.get_sensor_age.return_value = DeviceAgeInfo(days=5)
+    client.get_latest_temp_target.return_value = None
+    client.get_summary.return_value = None
+    client.get_latest_temp_basal.return_value = None
     client.create_glucose.return_value = SensorGlucose(mgdl=120)
     client.create_meter_glucose.return_value = MagicMock()
     client.create_carb_intake.return_value = MagicMock()
