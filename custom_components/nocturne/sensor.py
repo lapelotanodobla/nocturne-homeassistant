@@ -13,6 +13,7 @@ from homeassistant.components.sensor import (
     SensorEntityDescription,
     SensorStateClass,
 )
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import (
@@ -22,7 +23,24 @@ from homeassistant.helpers.update_coordinator import (
 from homeassistant.util import dt as dt_util
 
 from . import NocturneConfigEntry
+from .coordinator import GlucoseCoordinator, reading_epoch
 from .device import CGM, HUB, PUMP, UPLOADER, device_info
+
+# The longest gap between two readings that still gives a change between them.
+DELTA_MAX_GAP_SECONDS = 15 * 60
+
+
+def _glucose_delta(d: dict[str, Any]) -> int | None:
+    """The newest reading minus the one before it, unknown across a gap."""
+    recent = d.get("recent_glucose") or []
+    if len(recent) < 2:
+        return None
+    previous, latest = recent[-2], recent[-1]
+    gap = (reading_epoch(latest) or 0) - (reading_epoch(previous) or 0)
+    if not 0 < gap <= DELTA_MAX_GAP_SECONDS:
+        return None
+    return round(latest.mgdl - previous.mgdl)
+
 
 # Auto basal is summed over this window, ending at the pump snapshot the doses arrived with.
 AUTO_BASAL_WINDOW = timedelta(hours=1)
@@ -223,6 +241,16 @@ GLUCOSE_SENSORS: list[NocturneSensorDescription] = [
             "FortyFiveDown", "SingleDown", "DoubleDown",
             "NotComputable", "RateOutOfRange",
         ],
+    ),
+    NocturneSensorDescription(
+        key="glucose_delta",
+        translation_key="glucose_delta",
+        native_unit_of_measurement="mg/dL",
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:delta",
+        coordinator_key="glucose",
+        value_fn=_glucose_delta,
+        available_fn=lambda d: _glucose_delta(d) is not None,
     ),
     NocturneSensorDescription(
         key="iob",
@@ -466,6 +494,37 @@ class NocturneSensor(CoordinatorEntity, SensorEntity):
         return attributes_fn(self.coordinator.data)
 
 
+class NocturneRecentGlucoseSensor(CoordinatorEntity[GlucoseCoordinator], SensorEntity):
+    """The readings of the last few hours, oldest first, for displays that draw a history strip.
+
+    The state is how many readings there are; the readings are an attribute kept out of the
+    recorder, since they repeat on every new reading.
+    """
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "recent_glucose"
+    _attr_icon = "mdi:chart-timeline-variant"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _unrecorded_attributes = frozenset({"readings"})
+
+    def __init__(self, coordinator: GlucoseCoordinator, entry_id: str) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry_id}_recent_glucose"
+        self._attr_device_info = device_info(entry_id, HUB)
+
+    @property
+    def _recent(self) -> list:
+        return (self.coordinator.data or {}).get("recent_glucose") or []
+
+    @property
+    def native_value(self) -> int:
+        return len(self._recent)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {"readings": [[reading_epoch(r), round(r.mgdl)] for r in self._recent]}
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: NocturneConfigEntry,
@@ -473,6 +532,7 @@ async def async_setup_entry(
 ) -> None:
     """Set up every Nocturne sensor; each stays unavailable until its data arrives."""
     data = entry.runtime_data
+    async_add_entities([NocturneRecentGlucoseSensor(data.glucose_coordinator, entry.entry_id)])
     async_add_entities(
         NocturneSensor(
             data.glucose_coordinator

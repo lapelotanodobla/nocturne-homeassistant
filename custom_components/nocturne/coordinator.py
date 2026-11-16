@@ -23,6 +23,33 @@ from .const import DEVICE_UPDATE_INTERVAL_SECONDS, GLUCOSE_UPDATE_INTERVAL_SECON
 
 _LOGGER = logging.getLogger(__name__)
 
+# The readings behind a 32-slot strip of 5-minute readings, with a slot of slack.
+RECENT_GLUCOSE_WINDOW = timedelta(minutes=165)
+
+
+def reading_epoch(reading: SensorGlucose) -> int | None:
+    """Unix seconds of a reading, from its mills or its timestamp."""
+    if reading.mills is not None:
+        return reading.mills // 1000
+    if reading.timestamp is not None:
+        stamp = reading.timestamp
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=dt_util.UTC)
+        return int(stamp.timestamp())
+    return None
+
+
+def merge_recent(existing: list[SensorGlucose], new: list[SensorGlucose]) -> list[SensorGlucose]:
+    """Readings within the window, one per time, oldest first."""
+    cutoff = int((dt_util.utcnow() - RECENT_GLUCOSE_WINDOW).timestamp())
+    by_time: dict[int, SensorGlucose] = {}
+    for reading in [*existing, *new]:
+        epoch = reading_epoch(reading)
+        if epoch is not None and epoch >= cutoff and reading.mgdl is not None:
+            by_time[epoch] = reading
+    return [by_time[epoch] for epoch in sorted(by_time)]
+
+
 # Covers the hour that auto basal is summed over plus how far behind the pump's data can lag.
 AUTO_BASAL_FETCH_WINDOW = timedelta(hours=2)
 
@@ -94,7 +121,12 @@ class GlucoseCoordinator(NocturneCoordinator):
         readings = payload.get("readings") if isinstance(payload, dict) else None
         if not readings or self.data is None:
             return
-        self.data = {**self.data, "glucose": SensorGlucose.from_dict(readings[-1])}
+        pushed = [SensorGlucose.from_dict(reading) for reading in readings]
+        self.data = {
+            **self.data,
+            "glucose": pushed[-1],
+            "recent_glucose": merge_recent(self.data.get("recent_glucose") or [], pushed),
+        }
         self.async_update_listeners()
 
     async def _async_fetch(self) -> dict[str, Any]:
@@ -102,6 +134,10 @@ class GlucoseCoordinator(NocturneCoordinator):
         previous_bolus = (self.data or {}).get("last_bolus")
         data = {
             "glucose": await self.client.get_latest_glucose(),
+            "recent_glucose": merge_recent(
+                [],
+                await self.client.get_recent_glucose(dt_util.utcnow() - RECENT_GLUCOSE_WINDOW),
+            ),
             "aps": aps,
             "summary": None,
             "pump": None,

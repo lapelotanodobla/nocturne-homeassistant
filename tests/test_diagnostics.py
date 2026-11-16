@@ -53,6 +53,7 @@ async def test_diagnostics_report_health_for_a_set_up_entry(
                 "last_bolus",
                 "last_carbs",
                 "pump",
+                "recent_glucose",
                 "summary",
                 "temp_basals",
                 "temp_target",

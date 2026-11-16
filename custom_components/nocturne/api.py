@@ -59,6 +59,8 @@ DAILY_SUMMARY_CACHE_SECONDS = 30 * 60
 # How far back to look for the last manual bolus when none is known yet, and how many
 # boluses to read per page while skipping automatic corrections.
 MANUAL_BOLUS_LOOKBACK = timedelta(hours=48)
+# Room for the readings of the Sugar Matrix strip window, even at a faster CGM cadence.
+RECENT_GLUCOSE_PAGE_SIZE = 64
 BOLUS_PAGE_SIZE = 100
 # Two hours of 5-minute auto-basal doses, with room to spare.
 TEMP_BASAL_PAGE_SIZE = 100
@@ -120,6 +122,19 @@ class NocturneApiClient:
                 if resp.data:
                     return resp.data[0]
                 return None
+
+        return await asyncio.to_thread(_call)
+
+    async def get_recent_glucose(self, since: datetime) -> list[SensorGlucose]:
+        """Fetch the sensor glucose readings since ``since``, oldest first."""
+        await self._ensure_token()
+
+        def _call() -> list[SensorGlucose]:
+            with self._client() as client:
+                resp = SensorGlucoseApi(client).sensor_glucose_get_all(
+                    var_from=since, limit=RECENT_GLUCOSE_PAGE_SIZE, sort="timestamp_desc"
+                )
+                return list(reversed(resp.data or []))
 
         return await asyncio.to_thread(_call)
 

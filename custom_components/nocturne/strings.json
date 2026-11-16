@@ -73,6 +73,12 @@
       "loop_status": {
         "name": "Loop Status"
       },
+      "glucose_delta": {
+        "name": "Glucose Delta"
+      },
+      "recent_glucose": {
+        "name": "Recent Glucose"
+      },
       "active_basal_rate": {
         "name": "Active Basal Rate"
       },

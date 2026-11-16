@@ -27,6 +27,8 @@ class TestSensorSetupEntry:
         assert states() == {
             "sensor.nocturne_current_glucose": "120",
             "sensor.nocturne_glucose_trend": "Flat",
+            "sensor.nocturne_glucose_delta": STATE_UNAVAILABLE,
+            "sensor.nocturne_recent_glucose": "0",
             "sensor.nocturne_insulin_on_board": STATE_UNAVAILABLE,
             "sensor.nocturne_carbs_on_board": STATE_UNAVAILABLE,
             "sensor.nocturne_predicted_bg": STATE_UNAVAILABLE,
@@ -66,7 +68,7 @@ class TestSensorRegistration:
         devices = dr.async_get(reauth_hass)
         for entry in (first, second):
             registered = er.async_entries_for_config_entry(entities, entry.entry_id)
-            assert len(registered) == 21
+            assert len(registered) == 23
             assert all(e.unique_id.startswith(f"{entry.entry_id}_") for e in registered)
             hub = devices.async_get_device({(DOMAIN, entry.entry_id)})
             parts = [

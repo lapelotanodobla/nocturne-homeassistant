@@ -124,6 +124,7 @@ def make_api_client() -> AsyncMock:
     """AsyncMock of NocturneApiClient with sensible defaults."""
     client = AsyncMock()
     client.validate_connection.return_value = True
+    client.get_recent_glucose.return_value = []
     client.get_latest_glucose.return_value = SensorGlucose(
         mgdl=120, direction=GlucoseDirection("Flat")
     )
