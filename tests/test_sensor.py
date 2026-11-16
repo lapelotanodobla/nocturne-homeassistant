@@ -35,9 +35,14 @@ class TestSensorSetupEntry:
             "sensor.nocturne_pump_reservoir": STATE_UNAVAILABLE,
             "sensor.nocturne_pump_battery": STATE_UNAVAILABLE,
             "sensor.nocturne_pump_mode": STATE_UNAVAILABLE,
-            "sensor.nocturne_cgm_battery": "90",
-            "sensor.nocturne_sensor_age": "5",
+            "sensor.nocturne_uploader_battery": "90",
+            "sensor.nocturne_cgm_sensor_age": "5",
             "sensor.nocturne_time_in_range": "72.5",
+            "sensor.nocturne_pump_last_bolus": STATE_UNAVAILABLE,
+            "sensor.nocturne_last_carbs": STATE_UNAVAILABLE,
+            "sensor.nocturne_pump_last_alert": STATE_UNAVAILABLE,
+            "sensor.nocturne_cgm_battery": STATE_UNAVAILABLE,
+            "sensor.nocturne_cgm_sensor_state": STATE_UNAVAILABLE,
         }
 
         client.get_latest_aps_snapshot.return_value = ApsSnapshot(iob=2.5)
@@ -60,11 +65,15 @@ class TestSensorRegistration:
         devices = dr.async_get(reauth_hass)
         for entry in (first, second):
             registered = er.async_entries_for_config_entry(entities, entry.entry_id)
-            assert len(registered) == 14
+            assert len(registered) == 20
             assert all(e.unique_id.startswith(f"{entry.entry_id}_") for e in registered)
-            assert {e.device_id for e in registered} == {
-                devices.async_get_device({(DOMAIN, entry.entry_id)}).id
-            }
+            hub = devices.async_get_device({(DOMAIN, entry.entry_id)})
+            parts = [
+                devices.async_get_device({(DOMAIN, f"{entry.entry_id}_{kind}")})
+                for kind in ("pump", "cgm", "uploader")
+            ]
+            assert {e.device_id for e in registered} == {hub.id, *(part.id for part in parts)}
+            assert all(part.via_device_id == hub.id for part in parts)
         assert (
             entities.async_get_entity_id("sensor", DOMAIN, f"{first.entry_id}_current_glucose")
             != entities.async_get_entity_id("sensor", DOMAIN, f"{second.entry_id}_current_glucose")

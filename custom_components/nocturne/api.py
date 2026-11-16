@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
-from datetime import date, datetime
+from datetime import UTC, date, datetime, timedelta
+from typing import Any
 
 from nocturne_py import (
     ApiClient,
@@ -35,6 +37,8 @@ from nocturne_py import (
     StateSpansApi,
     StatusApi,
     SummaryApi,
+    SystemEvent,
+    SystemEventsApi,
     TempBasal,
     TempBasalApi,
     UploaderSnapshot,
@@ -51,6 +55,20 @@ from .auth import TokenProvider
 _LOGGER = logging.getLogger(__name__)
 
 DAILY_SUMMARY_CACHE_SECONDS = 30 * 60
+
+# How far back to look for the last manual bolus when none is known yet, and how many
+# boluses to read per page while skipping automatic corrections.
+MANUAL_BOLUS_LOOKBACK = timedelta(hours=48)
+BOLUS_PAGE_SIZE = 100
+
+# Recent system events to scan for the newest pump alert, and recent device statuses
+# to scan for one that carries CGM details.
+ALERT_SCAN_COUNT = 20
+DEVICE_STATUS_SCAN_COUNT = 5
+
+# Descriptions CareLink gives the copy of an alert it reports from the pump's alarm
+# snapshot; the notification copy of the same alert carries the real message.
+GENERIC_ALERT_DESCRIPTIONS = frozenset({"", "ALERT", "ALARM", "MESSAGE"})
 
 
 class NocturneApiClient:
@@ -176,6 +194,97 @@ class NocturneApiClient:
                 resp = TempBasalApi(client).temp_basal_get_all(limit=1, sort="timestamp_desc")
                 if resp.data:
                     return resp.data[0]
+                return None
+
+        return await asyncio.to_thread(_call)
+
+    async def get_latest_manual_bolus(self, since: datetime | None = None) -> Bolus | None:
+        """Fetch the newest bolus that was not an automatic correction.
+
+        Pumps such as the 780G log each auto-correction as a bolus, which can bury the
+        last manual one under hundreds of them, so this pages back to ``since``
+        (48 hours ago by default) until it finds one.
+        """
+        await self._ensure_token()
+        start = since or datetime.now(UTC) - MANUAL_BOLUS_LOOKBACK
+
+        def _call() -> Bolus | None:
+            with self._client() as client:
+                api = BolusApi(client)
+                offset = 0
+                while True:
+                    resp = api.bolus_get_all(
+                        var_from=start, limit=BOLUS_PAGE_SIZE, offset=offset, sort="timestamp_desc"
+                    )
+                    page = resp.data or []
+                    for bolus in page:
+                        if not bolus.automatic:
+                            return bolus
+                    if len(page) < BOLUS_PAGE_SIZE:
+                        return None
+                    offset += BOLUS_PAGE_SIZE
+
+        return await asyncio.to_thread(_call)
+
+    async def get_latest_carbs(self) -> CarbIntake | None:
+        """Fetch the most recent carb entry."""
+        await self._ensure_token()
+
+        def _call() -> CarbIntake | None:
+            with self._client() as client:
+                resp = NutritionApi(client).nutrition_get_carb_intakes(
+                    limit=1, sort="timestamp_desc"
+                )
+                if resp.data:
+                    return resp.data[0]
+                return None
+
+        return await asyncio.to_thread(_call)
+
+    async def get_latest_pump_alert(self) -> SystemEvent | None:
+        """Fetch the newest system event that carries an alert message."""
+        await self._ensure_token()
+
+        def _call() -> SystemEvent | None:
+            with self._client() as client:
+                events = SystemEventsApi(client).system_events_get_system_events(
+                    count=ALERT_SCAN_COUNT
+                )
+                for event in events:
+                    if (event.description or "") not in GENERIC_ALERT_DESCRIPTIONS:
+                        return event
+                return None
+
+        return await asyncio.to_thread(_call)
+
+    async def get_cgm_status(self) -> dict[str, Any] | None:
+        """Fetch the CGM details of the newest device status: transmitter battery, sensor state.
+
+        Nocturne keeps these only in the Nightscout-style device status, which no v4
+        endpoint returns and the SDK therefore does not wrap, so this reads
+        ``/api/v1/devicestatus`` through the SDK's own client and token. Returns the
+        ``cgm`` and ``connect`` objects, or None when no recent status has them or the
+        token may not read device statuses.
+        """
+        await self._ensure_token()
+
+        def _call() -> dict[str, Any] | None:
+            with self._client() as client:
+                request = client.param_serialize(
+                    "GET",
+                    "/api/v1/devicestatus",
+                    query_params=[("count", DEVICE_STATUS_SCAN_COUNT)],
+                    auth_settings=["bearer"],
+                )
+                resp = client.call_api(*request)
+                resp.read()
+                if resp.status == 403:
+                    return None
+                if not 200 <= resp.status < 300:
+                    raise ApiException(http_resp=resp)
+                for doc in json.loads(resp.data):
+                    if isinstance(doc, dict) and isinstance(doc.get("cgm"), dict):
+                        return {"cgm": doc["cgm"], "connect": doc.get("connect") or {}}
                 return None
 
         return await asyncio.to_thread(_call)

@@ -22,7 +22,7 @@ from homeassistant.helpers.update_coordinator import (
 from homeassistant.util import dt as dt_util
 
 from . import NocturneConfigEntry
-from .const import DOMAIN
+from .device import CGM, HUB, PUMP, UPLOADER, device_info
 
 # How long past its end the latest temp basal still counts as the running rate: CareLink
 # reports each 5-minute auto-basal dose 5 to 10 minutes late.
@@ -54,6 +54,103 @@ def _basal_rate(d: dict[str, Any]) -> float | None:
 
 
 
+# Readable names for the CareLink alert messages seen so far; others fall back to
+# their code, made readable by _humanize.
+PUMP_ALERT_MESSAGES = {
+    "BC_SID_SG_APPROACH_LOW_LIMIT_CHECK_BG": "Alert before low",
+    "BC_SID_LOW_SD_CHECK_BG": "Alert on low",
+    "BC_MESSAGE_SG_UNDER_50_MG_DL": "Glucose under 50 mg/dL",
+    "BC_SID_HIGH_SG_CHECK_BG": "Alert on high",
+    "BC_SID_MOVE_PUMP_CLOSER_TO_MINILINK": "Lost sensor signal: move pump closer to transmitter",
+    "BC_SID_MOVE_AWAY_FROM_ELECTR_DEVICES": "Lost sensor signal: move away from electronic devices",
+    "BC_SID_BOLUS_ENTRY_TIMED_OUT": "Bolus entry timed out",
+    "BC_MESSAGE_TIME_REMAINING_CHANGE_RESERVOIR": "Low reservoir",
+    "BC_SID_CHECK_BG_CONSIDER_TESTING_KETONES_CHANGE_RESERVOIR": "Insulin flow blocked: check BG, consider ketones",
+    "BC_SID_ENTER_BG_TO_CONTINUE_IN_SMART_GUARD": "BG required to stay in SmartGuard",
+    "BC_SID_SMART_GUARD_MAXIMUM_DELIVERY": "SmartGuard maximum delivery",
+    "BC_SID_SMART_GUARD_MINIMUM_DELIVERY": "SmartGuard minimum delivery",
+    "BC_SID_BASAL_STARTED_SMART_GUARD": "SmartGuard exited: basal started",
+    "BC_SID_REPLACE_BATTERY_SOON": "Replace pump battery soon",
+    "BC_SID_INSERT_NEW_AA_BATTERY": "Insert new AA battery",
+    "BC_SID_DELIVERY_STOPPED_INSERT_NEW_BATTERY": "Delivery stopped: insert new battery",
+    "BC_SID_IF_NEW_SENSR_SELCT_START_NEW_ELSE_REWIND": "Sensor connected",
+    "BC_SID_INSERT_NEW_SENSOR": "Change sensor",
+    "BC_SID_INSERT_AND_START_NEW_SENSOR": "Insert and start a new sensor",
+    "BC_SID_SENSOR_RELATED_ISSUE_INSERT_NEW": "Sensor issue: insert a new sensor",
+    "BC_SID_ENTER_BG_TO_CALIBRATE_SENSOR": "Calibration required",
+    "BC_SID_ENTER_BG_TO_CALIBRATE_SENSOR_SENSOR_INFO_NO_AVAILABLE": "Calibration required",
+    "BC_SID_WAIT_AT_LEAST_15_MINUTES": "Calibration not accepted: wait 15 minutes",
+    "BC_SID_ENSURE_CONNECTION_SECURE": "Sensor connection: check transmitter",
+    "BC_SID_SENSOR_INFO_UNAVAILABLE_FOR_UP_TO_TWO_HOURS": "Sensor updating (up to 2 hours)",
+    "BC_SID_UPDATING_CAN_TAKE_UP_TO_NINETY_MINUTES": "Sensor updating (up to 90 minutes)",
+}
+
+SENSOR_STATES = {
+    "NO_ERROR_MESSAGE": "OK",
+    "WARM_UP": "Warming up",
+    "CALIBRATING": "Calibrating",
+    "CALIBRATION_REQUIRED": "Calibration required",
+    "WAIT_TO_CALIBRATE": "Wait to calibrate",
+    "DO_NOT_CALIBRATE": "Do not calibrate",
+    "CHANGE_SENSOR": "Change sensor",
+    "SENSOR_DISCONNECTED": "Sensor disconnected",
+    "SEARCHING_FOR_SENSOR_SIGNAL": "Searching for signal",
+    "NO_SENSOR_SIGNAL": "No sensor signal",
+    "NO_DATA_FROM_PUMP": "No data from pump",
+    "SG_BELOW_40_MGDL": "Below 40 mg/dL",
+}
+
+
+def _humanize(code: str) -> str:
+    for prefix in ("BC_SID_", "BC_MESSAGE_", "BC_"):
+        code = code.removeprefix(prefix)
+    return code.replace("_", " ").capitalize()
+
+
+def _alert_message(d: dict[str, Any]) -> str | None:
+    alert = d.get("last_alert")
+    if alert is None or not alert.description:
+        return None
+    return PUMP_ALERT_MESSAGES.get(alert.description) or _humanize(alert.description)
+
+
+def _alert_attributes(d: dict[str, Any]) -> dict[str, Any]:
+    alert = d.get("last_alert")
+    if alert is None:
+        return {}
+    return {
+        "time": dt_util.utc_from_timestamp(alert.mills / 1000) if alert.mills else None,
+        "type": alert.event_type.value if alert.event_type else None,
+        "code": alert.description,
+    }
+
+
+def _cgm(d: dict[str, Any]) -> dict[str, Any]:
+    status = d.get("cgm")
+    return status["cgm"] if status else {}
+
+
+def _transmitter_battery(d: dict[str, Any]) -> int | None:
+    # Out of range, CareLink keeps sending the last or a placeholder battery level.
+    status = d.get("cgm")
+    if not status or status["connect"].get("conduitSensorInRange") is not True:
+        return None
+    return status["cgm"].get("transmitterBattery")
+
+
+def _sensor_state(d: dict[str, Any]) -> str | None:
+    state = _cgm(d).get("sensorState")
+    if not state or state == "UNKNOWN":
+        return None
+    return SENSOR_STATES.get(state) or _humanize(state)
+
+
+def _time_attribute(d: dict[str, Any], key: str) -> dict[str, Any]:
+    record = d.get(key)
+    return {"time": record.timestamp} if record is not None else {}
+
+
+
 @dataclass(frozen=True, kw_only=True)
 class NocturneSensorDescription(SensorEntityDescription):
     """Describes a Nocturne sensor."""
@@ -61,7 +158,9 @@ class NocturneSensorDescription(SensorEntityDescription):
     value_fn: Callable[[dict[str, Any]], Any]
     available_fn: Callable[[dict[str, Any]], bool]
     coordinator_key: str  # "glucose" or "device"
+    device: str = HUB
     enum_options: list[str] | None = None
+    attributes_fn: Callable[[dict[str, Any]], dict[str, Any]] | None = None
 
 
 GLUCOSE_SENSORS: list[NocturneSensorDescription] = [
@@ -147,6 +246,39 @@ GLUCOSE_SENSORS: list[NocturneSensorDescription] = [
         value_fn=_basal_rate,
         available_fn=lambda d: _basal_rate(d) is not None,
     ),
+    NocturneSensorDescription(
+        key="last_bolus",
+        translation_key="last_bolus",
+        native_unit_of_measurement="U",
+        suggested_display_precision=2,
+        icon="mdi:needle",
+        coordinator_key="glucose",
+        device=PUMP,
+        value_fn=lambda d: d["last_bolus"].insulin if d.get("last_bolus") else None,
+        available_fn=lambda d: d.get("last_bolus") is not None and d["last_bolus"].insulin is not None,
+        attributes_fn=lambda d: _time_attribute(d, "last_bolus"),
+    ),
+    NocturneSensorDescription(
+        key="last_carbs",
+        translation_key="last_carbs",
+        native_unit_of_measurement="g",
+        suggested_display_precision=0,
+        icon="mdi:food-apple",
+        coordinator_key="glucose",
+        value_fn=lambda d: d["last_carbs"].carbs if d.get("last_carbs") else None,
+        available_fn=lambda d: d.get("last_carbs") is not None and d["last_carbs"].carbs is not None,
+        attributes_fn=lambda d: _time_attribute(d, "last_carbs"),
+    ),
+    NocturneSensorDescription(
+        key="last_pump_alert",
+        translation_key="last_pump_alert",
+        icon="mdi:alert-circle-outline",
+        coordinator_key="glucose",
+        device=PUMP,
+        value_fn=_alert_message,
+        available_fn=lambda d: _alert_message(d) is not None,
+        attributes_fn=_alert_attributes,
+    ),
 ]
 
 DEVICE_SENSORS: list[NocturneSensorDescription] = [
@@ -158,6 +290,7 @@ DEVICE_SENSORS: list[NocturneSensorDescription] = [
         suggested_display_precision=1,
         icon="mdi:beaker",
         coordinator_key="device",
+        device=PUMP,
         value_fn=lambda d: d["pump"].reservoir if d.get("pump") else None,
         available_fn=lambda d: d.get("pump") is not None and d["pump"].reservoir is not None,
     ),
@@ -169,6 +302,7 @@ DEVICE_SENSORS: list[NocturneSensorDescription] = [
         state_class=SensorStateClass.MEASUREMENT,
         icon="mdi:battery",
         coordinator_key="device",
+        device=PUMP,
         value_fn=lambda d: d["pump"].battery_percent if d.get("pump") else None,
         available_fn=lambda d: d.get("pump") is not None and d["pump"].battery_percent is not None,
     ),
@@ -177,6 +311,7 @@ DEVICE_SENSORS: list[NocturneSensorDescription] = [
         translation_key="pump_mode",
         icon="mdi:auto-mode",
         coordinator_key="device",
+        device=PUMP,
         value_fn=lambda d: d["pump"].pump_mode if d.get("pump") else None,
         available_fn=lambda d: d.get("pump") is not None and d["pump"].pump_mode is not None,
     ),
@@ -188,6 +323,7 @@ DEVICE_SENSORS: list[NocturneSensorDescription] = [
         state_class=SensorStateClass.MEASUREMENT,
         icon="mdi:battery",
         coordinator_key="device",
+        device=UPLOADER,
         value_fn=lambda d: d["uploader"].battery if d.get("uploader") else None,
         available_fn=lambda d: d.get("uploader") is not None and d["uploader"].battery is not None,
     ),
@@ -199,8 +335,12 @@ DEVICE_SENSORS: list[NocturneSensorDescription] = [
         state_class=SensorStateClass.MEASUREMENT,
         icon="mdi:timer-sand",
         coordinator_key="device",
+        device=CGM,
         value_fn=lambda d: d["sensor_age"].days if d.get("sensor_age") else None,
-        available_fn=lambda d: d.get("sensor_age") is not None and d["sensor_age"].days is not None,
+        # Without a recorded sensor start the server still answers, with found false and 0 days.
+        available_fn=lambda d: d.get("sensor_age") is not None
+        and d["sensor_age"].found is True
+        and d["sensor_age"].days is not None,
     ),
     NocturneSensorDescription(
         key="time_in_range",
@@ -211,6 +351,27 @@ DEVICE_SENSORS: list[NocturneSensorDescription] = [
         coordinator_key="device",
         value_fn=lambda d: d["daily_summary"].time_in_range_percent if d.get("daily_summary") else None,
         available_fn=lambda d: d.get("daily_summary") is not None and d["daily_summary"].time_in_range_percent is not None,
+    ),
+    NocturneSensorDescription(
+        key="transmitter_battery",
+        translation_key="transmitter_battery",
+        device_class=SensorDeviceClass.BATTERY,
+        native_unit_of_measurement="%",
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:battery",
+        coordinator_key="device",
+        device=CGM,
+        value_fn=_transmitter_battery,
+        available_fn=lambda d: _transmitter_battery(d) is not None,
+    ),
+    NocturneSensorDescription(
+        key="sensor_state",
+        translation_key="sensor_state",
+        icon="mdi:access-point",
+        coordinator_key="device",
+        device=CGM,
+        value_fn=_sensor_state,
+        available_fn=lambda d: _sensor_state(d) is not None,
     ),
 ]
 
@@ -228,17 +389,14 @@ class NocturneSensor(CoordinatorEntity, SensorEntity):
         coordinator: DataUpdateCoordinator,
         description: NocturneSensorDescription,
         entry_id: str,
+        device_data: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(coordinator)
         self.entity_description = description
         self._attr_unique_id = f"{entry_id}_{description.key}"
         if description.enum_options is not None:
             self._attr_options = description.enum_options
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, entry_id)},
-            "name": "Nocturne",
-            "manufacturer": "Nocturne",
-        }
+        self._attr_device_info = device_info(entry_id, description.device, device_data)
 
     @property
     def native_value(self) -> Any:
@@ -251,6 +409,13 @@ class NocturneSensor(CoordinatorEntity, SensorEntity):
         if not super().available or self.coordinator.data is None:
             return False
         return self.entity_description.available_fn(self.coordinator.data)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        attributes_fn = self.entity_description.attributes_fn
+        if attributes_fn is None or self.coordinator.data is None:
+            return None
+        return attributes_fn(self.coordinator.data)
 
 
 async def async_setup_entry(
@@ -267,6 +432,7 @@ async def async_setup_entry(
             else data.device_coordinator,
             desc,
             entry.entry_id,
+            data.device_coordinator.data,
         )
         for desc in ALL_SENSORS
     )

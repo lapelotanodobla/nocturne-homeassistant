@@ -13,8 +13,8 @@ from homeassistant.util import dt as dt_util
 from nocturne_py import StateSpan
 
 from . import NocturneConfigEntry
-from .const import DOMAIN
-from .coordinator import GlucoseCoordinator
+from .coordinator import DeviceCoordinator, GlucoseCoordinator
+from .device import HUB, PUMP, device_info
 
 
 def _aware(value: datetime | None) -> datetime | None:
@@ -37,11 +37,7 @@ class NocturneTempTargetSensor(CoordinatorEntity[GlucoseCoordinator], BinarySens
     def __init__(self, coordinator: GlucoseCoordinator, entry_id: str) -> None:
         super().__init__(coordinator)
         self._attr_unique_id = f"{entry_id}_temp_target"
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, entry_id)},
-            "name": "Nocturne",
-            "manufacturer": "Nocturne",
-        }
+        self._attr_device_info = device_info(entry_id, HUB)
 
     @property
     def _span(self) -> StateSpan | None:
@@ -71,12 +67,42 @@ class NocturneTempTargetSensor(CoordinatorEntity[GlucoseCoordinator], BinarySens
         }
 
 
+class NocturnePumpSuspendedSensor(CoordinatorEntity[DeviceCoordinator], BinarySensorEntity):
+    """On while the latest pump snapshot reports insulin delivery suspended."""
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "pump_suspended"
+    _attr_icon = "mdi:pause-octagon-outline"
+
+    def __init__(self, coordinator: DeviceCoordinator, entry_id: str) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry_id}_pump_suspended"
+        self._attr_device_info = device_info(entry_id, PUMP, coordinator.data)
+
+    @property
+    def _suspended(self) -> bool | None:
+        pump = (self.coordinator.data or {}).get("pump")
+        return pump.suspended if pump is not None else None
+
+    @property
+    def available(self) -> bool:
+        return super().available and self._suspended is not None
+
+    @property
+    def is_on(self) -> bool | None:
+        return self._suspended
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: NocturneConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up the temporary target sensor."""
+    """Set up the temporary target and pump suspended sensors."""
+    data = entry.runtime_data
     async_add_entities(
-        [NocturneTempTargetSensor(entry.runtime_data.glucose_coordinator, entry.entry_id)]
+        [
+            NocturneTempTargetSensor(data.glucose_coordinator, entry.entry_id),
+            NocturnePumpSuspendedSensor(data.device_coordinator, entry.entry_id),
+        ]
     )

@@ -49,6 +49,9 @@
     "binary_sensor": {
       "temp_target": {
         "name": "Temp Target"
+      },
+      "pump_suspended": {
+        "name": "Suspended"
       }
     },
     "sensor": {
@@ -74,22 +77,37 @@
         "name": "Active Basal Rate"
       },
       "pump_reservoir": {
-        "name": "Pump Reservoir"
+        "name": "Reservoir"
       },
       "pump_battery": {
-        "name": "Pump Battery"
+        "name": "Battery"
       },
       "pump_mode": {
-        "name": "Pump Mode"
+        "name": "Mode"
       },
       "cgm_battery": {
-        "name": "CGM Battery"
+        "name": "Battery"
       },
       "sensor_age": {
         "name": "Sensor Age"
       },
       "time_in_range": {
         "name": "Time in Range"
+      },
+      "transmitter_battery": {
+        "name": "Battery"
+      },
+      "sensor_state": {
+        "name": "Sensor State"
+      },
+      "last_bolus": {
+        "name": "Last Bolus"
+      },
+      "last_carbs": {
+        "name": "Last Carbs"
+      },
+      "last_pump_alert": {
+        "name": "Last Alert"
       }
     }
   },

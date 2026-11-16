@@ -46,11 +46,20 @@ async def test_diagnostics_report_health_for_a_set_up_entry(
     assert result["coordinators"] == {
         "glucose": {
             "last_update_success": True,
-            "data_keys": ["aps", "glucose", "summary", "temp_basal", "temp_target"],
+            "data_keys": [
+                "aps",
+                "glucose",
+                "last_alert",
+                "last_bolus",
+                "last_carbs",
+                "summary",
+                "temp_basal",
+                "temp_target",
+            ],
         },
         "device": {
             "last_update_success": True,
-            "data_keys": ["daily_summary", "profile", "pump", "sensor_age", "uploader"],
+            "data_keys": ["cgm", "daily_summary", "profile", "pump", "sensor_age", "uploader"],
         },
     }
     assert result["entry"]["options"] == {CONF_NOTIFY_SERVICES: ["notify.mobile_app_phone"]}

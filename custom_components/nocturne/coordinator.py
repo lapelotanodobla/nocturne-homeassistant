@@ -96,12 +96,21 @@ class GlucoseCoordinator(NocturneCoordinator):
 
     async def _async_fetch(self) -> dict[str, Any]:
         aps = await self.client.get_latest_aps_snapshot()
+        previous_bolus = (self.data or {}).get("last_bolus")
         data = {
             "glucose": await self.client.get_latest_glucose(),
             "aps": aps,
             "summary": None,
             "temp_basal": None,
             "temp_target": await self.client.get_latest_temp_target(),
+            # Searching from the last known manual bolus keeps the scan short when
+            # automatic corrections pile up; an empty answer means no newer one.
+            "last_bolus": await self.client.get_latest_manual_bolus(
+                previous_bolus.timestamp if previous_bolus else None
+            )
+            or previous_bolus,
+            "last_carbs": await self.client.get_latest_carbs(),
+            "last_alert": await self.client.get_latest_pump_alert(),
         }
         if aps is None:
             # A pump that runs its own algorithm (CareLink, Tandem) leaves no APS snapshot:
@@ -128,4 +137,5 @@ class DeviceCoordinator(NocturneCoordinator):
             "profile": await self.client.get_profile_summary(),
             "daily_summary": await self.client.get_daily_summary(dt_util.now().date()),
             "sensor_age": await self.client.get_sensor_age(),
+            "cgm": await self.client.get_cgm_status(),
         }
