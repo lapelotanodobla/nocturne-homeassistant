@@ -44,6 +44,11 @@ class TestGlucoseDelta:
         await _setup(reauth_hass, stubs, [_reading(190, 20), _reading(186, 0)])
         assert reauth_hass.states.get(DELTA).state == STATE_UNAVAILABLE
 
+    async def test_delta_unavailable_when_newest_is_old(self, reauth_hass, stubs):
+        """Two old readings 5 min apart are not a current change."""
+        await _setup(reauth_hass, stubs, [_reading(190, 45), _reading(186, 40)])
+        assert reauth_hass.states.get(DELTA).state == STATE_UNAVAILABLE
+
     async def test_delta_unavailable_with_one_reading(self, reauth_hass, stubs):
         await _setup(reauth_hass, stubs, [_reading(186, 0)])
         assert reauth_hass.states.get(DELTA).state == STATE_UNAVAILABLE

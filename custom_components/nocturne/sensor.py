@@ -28,16 +28,20 @@ from .device import CGM, HUB, PUMP, UPLOADER, device_info
 
 # The longest gap between two readings that still gives a change between them.
 DELTA_MAX_GAP_SECONDS = 15 * 60
+# The oldest the newest reading may be for its change to count as current.
+DELTA_MAX_AGE_SECONDS = 20 * 60
 
 
 def _glucose_delta(d: dict[str, Any]) -> int | None:
-    """The newest reading minus the one before it, unknown across a gap."""
+    """The newest reading minus the one before it, unknown across a gap or once it is old."""
     recent = d.get("recent_glucose") or []
     if len(recent) < 2:
         return None
     previous, latest = recent[-2], recent[-1]
     gap = (reading_epoch(latest) or 0) - (reading_epoch(previous) or 0)
     if not 0 < gap <= DELTA_MAX_GAP_SECONDS:
+        return None
+    if dt_util.utcnow().timestamp() - (reading_epoch(latest) or 0) > DELTA_MAX_AGE_SECONDS:
         return None
     return round(latest.mgdl - previous.mgdl)
 
