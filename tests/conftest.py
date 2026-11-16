@@ -137,7 +137,7 @@ def make_api_client() -> AsyncMock:
     client.get_sensor_age.return_value = DeviceAgeInfo(found=True, days=5)
     client.get_latest_temp_target.return_value = None
     client.get_summary.return_value = None
-    client.get_latest_temp_basal.return_value = None
+    client.get_temp_basals_since.return_value = []
     client.get_latest_manual_bolus.return_value = None
     client.get_latest_carbs.return_value = None
     client.get_latest_pump_alert.return_value = None

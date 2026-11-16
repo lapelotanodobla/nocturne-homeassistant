@@ -60,6 +60,8 @@ DAILY_SUMMARY_CACHE_SECONDS = 30 * 60
 # boluses to read per page while skipping automatic corrections.
 MANUAL_BOLUS_LOOKBACK = timedelta(hours=48)
 BOLUS_PAGE_SIZE = 100
+# Two hours of 5-minute auto-basal doses, with room to spare.
+TEMP_BASAL_PAGE_SIZE = 100
 
 # Recent system events to scan for the newest pump alert, and recent device statuses
 # to scan for one that carries CGM details.
@@ -185,16 +187,16 @@ class NocturneApiClient:
 
         return await asyncio.to_thread(_call)
 
-    async def get_latest_temp_basal(self) -> TempBasal | None:
-        """Fetch the most recent temp basal."""
+    async def get_temp_basals_since(self, start: datetime) -> list[TempBasal]:
+        """Fetch the temp basals that started at or after ``start``, newest first."""
         await self._ensure_token()
 
-        def _call() -> TempBasal | None:
+        def _call() -> list[TempBasal]:
             with self._client() as client:
-                resp = TempBasalApi(client).temp_basal_get_all(limit=1, sort="timestamp_desc")
-                if resp.data:
-                    return resp.data[0]
-                return None
+                resp = TempBasalApi(client).temp_basal_get_all(
+                    var_from=start, limit=TEMP_BASAL_PAGE_SIZE, sort="timestamp_desc"
+                )
+                return list(resp.data or [])
 
         return await asyncio.to_thread(_call)
 

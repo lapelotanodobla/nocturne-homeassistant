@@ -16,10 +16,12 @@ from nocturne_py import (
     PumpSnapshot,
     SystemEvent,
     SystemEventType,
+    TempBasal,
 )
 from nocturne_py.models import PaginatedResponseOfBolus as BolusPaginatedResponse
+from nocturne_py.models import PaginatedResponseOfTempBasal as TempBasalPaginatedResponse
 
-from custom_components.nocturne.api import BOLUS_PAGE_SIZE, NocturneApiClient
+from custom_components.nocturne.api import BOLUS_PAGE_SIZE, TEMP_BASAL_PAGE_SIZE, NocturneApiClient
 from custom_components.nocturne.const import DOMAIN
 
 from .conftest import make_api_client, make_entry, set_up
@@ -194,6 +196,16 @@ class TestApiManualBolus:
             await client.get_latest_manual_bolus()
             start = api_cls.return_value.bolus_get_all.call_args.kwargs["var_from"]
         assert timedelta(hours=47) < datetime.now(UTC) - start < timedelta(hours=49)
+
+
+class TestApiTempBasals:
+    async def test_returns_the_doses_since_the_start(self, client):
+        doses = [TempBasal(rate=0.3), TempBasal(rate=0.9)]
+        with patch("custom_components.nocturne.api.TempBasalApi") as api_cls:
+            api_cls.return_value.temp_basal_get_all.return_value = TempBasalPaginatedResponse(data=doses)
+            assert await client.get_temp_basals_since(STAMP) == doses
+            kwargs = api_cls.return_value.temp_basal_get_all.call_args.kwargs
+        assert kwargs == {"var_from": STAMP, "limit": TEMP_BASAL_PAGE_SIZE, "sort": "timestamp_desc"}
 
 
 class TestApiPumpAlert:

@@ -32,6 +32,7 @@ class TestSensorSetupEntry:
             "sensor.nocturne_predicted_bg": STATE_UNAVAILABLE,
             "sensor.nocturne_loop_status": STATE_UNAVAILABLE,
             "sensor.nocturne_active_basal_rate": STATE_UNAVAILABLE,
+            "sensor.nocturne_pump_auto_basal_last_hour": STATE_UNAVAILABLE,
             "sensor.nocturne_pump_reservoir": STATE_UNAVAILABLE,
             "sensor.nocturne_pump_battery": STATE_UNAVAILABLE,
             "sensor.nocturne_pump_mode": STATE_UNAVAILABLE,
@@ -65,7 +66,7 @@ class TestSensorRegistration:
         devices = dr.async_get(reauth_hass)
         for entry in (first, second):
             registered = er.async_entries_for_config_entry(entities, entry.entry_id)
-            assert len(registered) == 20
+            assert len(registered) == 21
             assert all(e.unique_id.startswith(f"{entry.entry_id}_") for e in registered)
             hub = devices.async_get_device({(DOMAIN, entry.entry_id)})
             parts = [

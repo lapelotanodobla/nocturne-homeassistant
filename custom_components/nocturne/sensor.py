@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -24,9 +24,11 @@ from homeassistant.util import dt as dt_util
 from . import NocturneConfigEntry
 from .device import CGM, HUB, PUMP, UPLOADER, device_info
 
-# How long past its end the latest temp basal still counts as the running rate: CareLink
-# reports each 5-minute auto-basal dose 5 to 10 minutes late.
-TEMP_BASAL_GRACE = timedelta(minutes=15)
+# Auto basal is summed over this window, ending at the pump snapshot the doses arrived with.
+AUTO_BASAL_WINDOW = timedelta(hours=1)
+# A pump snapshot older than this means the pump's data has stopped arriving: CareLink
+# uploads every 5 minutes and is seen up to 10 minutes apart.
+PUMP_DATA_MAX_AGE = timedelta(minutes=15)
 
 
 def _iob(d: dict[str, Any]) -> float | None:
@@ -42,15 +44,48 @@ def _cob(d: dict[str, Any]) -> float | None:
 
 
 def _basal_rate(d: dict[str, Any]) -> float | None:
-    if d.get("aps"):
-        return d["aps"].enacted_rate
-    basal = d.get("temp_basal")
-    if basal is None or basal.end_timestamp is None:
+    return d["aps"].enacted_rate if d.get("aps") else None
+
+
+def _utc(value: datetime) -> datetime:
+    return value if value.tzinfo is not None else value.replace(tzinfo=dt_util.UTC)
+
+
+def _auto_basal_window_end(d: dict[str, Any]) -> datetime | None:
+    """The time the pump's auto-basal doses are known up to, if they are current.
+
+    Only an automatic-mode pump doses this way, and only a recent snapshot proves that
+    no dose is missing from the window.
+    """
+    pump = d.get("pump")
+    if pump is None or pump.pump_mode != "Automatic" or pump.timestamp is None:
         return None
-    end = basal.end_timestamp
-    if end.tzinfo is None:
-        end = end.replace(tzinfo=dt_util.UTC)
-    return basal.rate if dt_util.utcnow() - end <= TEMP_BASAL_GRACE else None
+    as_of = _utc(pump.timestamp)
+    return as_of if dt_util.utcnow() - as_of <= PUMP_DATA_MAX_AGE else None
+
+
+def _auto_basal_last_hour(d: dict[str, Any]) -> float | None:
+    """Units the pump delivered as auto basal in the hour up to its latest snapshot.
+
+    Nocturne stores each auto-basal dose as a rate over the time until the next dose, so
+    rate times duration gives the dose back. A dose without both makes the total unknown
+    rather than partial.
+    """
+    end = _auto_basal_window_end(d)
+    if end is None or d.get("temp_basals") is None:
+        return None
+    start = end - AUTO_BASAL_WINDOW
+    total = 0.0
+    for basal in d["temp_basals"]:
+        if basal.start_timestamp is None:
+            return None
+        if not start < _utc(basal.start_timestamp) <= end:
+            continue
+        if basal.rate is None or basal.end_timestamp is None:
+            return None
+        hours = (_utc(basal.end_timestamp) - _utc(basal.start_timestamp)).total_seconds() / 3600
+        total += basal.rate * hours
+    return round(total, 3)
 
 
 
@@ -245,6 +280,19 @@ GLUCOSE_SENSORS: list[NocturneSensorDescription] = [
         coordinator_key="glucose",
         value_fn=_basal_rate,
         available_fn=lambda d: _basal_rate(d) is not None,
+    ),
+    NocturneSensorDescription(
+        key="auto_basal_last_hour",
+        translation_key="auto_basal_last_hour",
+        native_unit_of_measurement="U",
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=3,
+        icon="mdi:iv-bag",
+        coordinator_key="glucose",
+        device=PUMP,
+        value_fn=_auto_basal_last_hour,
+        available_fn=lambda d: _auto_basal_last_hour(d) is not None,
+        attributes_fn=lambda d: {"as_of": _auto_basal_window_end(d)},
     ),
     NocturneSensorDescription(
         key="last_bolus",

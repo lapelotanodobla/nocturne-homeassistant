@@ -76,6 +76,9 @@
       "active_basal_rate": {
         "name": "Active Basal Rate"
       },
+      "auto_basal_last_hour": {
+        "name": "Auto Basal (Last Hour)"
+      },
       "pump_reservoir": {
         "name": "Reservoir"
       },

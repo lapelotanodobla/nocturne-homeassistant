@@ -23,6 +23,9 @@ from .const import DEVICE_UPDATE_INTERVAL_SECONDS, GLUCOSE_UPDATE_INTERVAL_SECON
 
 _LOGGER = logging.getLogger(__name__)
 
+# Covers the hour that auto basal is summed over plus how far behind the pump's data can lag.
+AUTO_BASAL_FETCH_WINDOW = timedelta(hours=2)
+
 
 class NocturneCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Polls Nocturne and maps API and token refresh errors for both coordinators."""
@@ -101,7 +104,8 @@ class GlucoseCoordinator(NocturneCoordinator):
             "glucose": await self.client.get_latest_glucose(),
             "aps": aps,
             "summary": None,
-            "temp_basal": None,
+            "pump": None,
+            "temp_basals": None,
             "temp_target": await self.client.get_latest_temp_target(),
             # Searching from the last known manual bolus keeps the scan short when
             # automatic corrections pile up; an empty answer means no newer one.
@@ -114,9 +118,13 @@ class GlucoseCoordinator(NocturneCoordinator):
         }
         if aps is None:
             # A pump that runs its own algorithm (CareLink, Tandem) leaves no APS snapshot:
-            # IOB and COB come from what Nocturne computes, the rate from the pump's own basal.
+            # IOB and COB come from what Nocturne computes, the basal from the pump's own
+            # auto-basal doses, read against the pump snapshot that says how current they are.
             data["summary"] = await self.client.get_summary()
-            data["temp_basal"] = await self.client.get_latest_temp_basal()
+            data["pump"] = await self.client.get_latest_pump_snapshot()
+            data["temp_basals"] = await self.client.get_temp_basals_since(
+                dt_util.utcnow() - AUTO_BASAL_FETCH_WINDOW
+            )
         return data
 
 
