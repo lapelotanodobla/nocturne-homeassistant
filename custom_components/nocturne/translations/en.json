@@ -109,6 +109,9 @@
       "sensor_state": {
         "name": "Sensor State"
       },
+      "cgm_status": {
+        "name": "Status"
+      },
       "last_bolus": {
         "name": "Last Bolus"
       },

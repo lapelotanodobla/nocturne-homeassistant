@@ -202,6 +202,25 @@ def _sensor_state(d: dict[str, Any]) -> str | None:
     return SENSOR_STATES.get(state) or _humanize(state)
 
 
+# Nocturne's CareLink connector reports why there is, or is not, a current reading
+# (connect.sensorStatus), so a planned gap (no sensor on, warm-up) reads differently from a fault.
+CGM_STATUSES = {
+    "Ok": "OK",
+    "WarmingUp": "Warming up",
+    "NoSensor": "No sensor",
+    "Connecting": "Connecting",
+    "SensorOutOfRange": "Sensor out of range",
+    "PumpOutOfReach": "Pump out of reach",
+}
+
+
+def _cgm_status(d: dict[str, Any]) -> str | None:
+    status = d.get("cgm")
+    if not status:
+        return None
+    return CGM_STATUSES.get(status["connect"].get("sensorStatus"))
+
+
 def _time_attribute(d: dict[str, Any], key: str) -> dict[str, Any]:
     record = d.get(key)
     return {"time": record.timestamp} if record is not None else {}
@@ -452,6 +471,15 @@ DEVICE_SENSORS: list[NocturneSensorDescription] = [
         device=CGM,
         value_fn=_sensor_state,
         available_fn=lambda d: _sensor_state(d) is not None,
+    ),
+    NocturneSensorDescription(
+        key="cgm_status",
+        translation_key="cgm_status",
+        icon="mdi:access-point-check",
+        coordinator_key="device",
+        device=CGM,
+        value_fn=_cgm_status,
+        available_fn=lambda d: _cgm_status(d) is not None,
     ),
 ]
 

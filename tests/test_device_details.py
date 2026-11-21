@@ -29,7 +29,10 @@ from .conftest import make_api_client, make_entry, set_up
 STAMP = datetime(2026, 11, 16, 7, 19, 9, tzinfo=UTC)
 
 
-def _cgm_status(battery=97, state="NO_ERROR_MESSAGE", in_range=True):
+def _cgm_status(battery=97, state="NO_ERROR_MESSAGE", in_range=True, status=None):
+    connect = {"conduitSensorInRange": in_range}
+    if status is not None:
+        connect["sensorStatus"] = status
     return {
         "cgm": {
             "manufacturer": "Medtronic",
@@ -37,7 +40,7 @@ def _cgm_status(battery=97, state="NO_ERROR_MESSAGE", in_range=True):
             "transmitterBattery": battery,
             "sensorState": state,
         },
-        "connect": {"conduitSensorInRange": in_range},
+        "connect": connect,
     }
 
 
@@ -98,6 +101,38 @@ class TestCgmStatus:
     async def test_unmapped_state_is_made_readable(self, reauth_hass, stubs):
         await _states(reauth_hass, stubs, get_cgm_status=_cgm_status(state="SENSOR_END_OF_LIFE"))
         assert reauth_hass.states.get("sensor.nocturne_cgm_sensor_state").state == "Sensor end of life"
+
+
+class TestCgmSensorStatus:
+    """Nocturne's reason for there being, or not being, a current reading."""
+
+    @pytest.mark.parametrize(
+        ("status", "expected"),
+        [
+            ("Ok", "OK"),
+            ("WarmingUp", "Warming up"),
+            ("NoSensor", "No sensor"),
+            ("Connecting", "Connecting"),
+            ("SensorOutOfRange", "Sensor out of range"),
+            ("PumpOutOfReach", "Pump out of reach"),
+        ],
+    )
+    async def test_status_reads_in_plain_words(self, reauth_hass, stubs, status, expected):
+        await _states(reauth_hass, stubs, get_cgm_status=_cgm_status(status=status))
+        assert reauth_hass.states.get("sensor.nocturne_cgm_status").state == expected
+
+    async def test_no_sensor_is_a_state_not_unavailable(self, reauth_hass, stubs):
+        await _states(
+            reauth_hass,
+            stubs,
+            get_cgm_status=_cgm_status(battery=None, in_range=False, status="NoSensor"),
+        )
+        assert reauth_hass.states.get("sensor.nocturne_cgm_status").state == "No sensor"
+
+    @pytest.mark.parametrize("status", [None, "Unknown"])
+    async def test_missing_or_unknown_status_is_unavailable(self, reauth_hass, stubs, status):
+        await _states(reauth_hass, stubs, get_cgm_status=_cgm_status(status=status))
+        assert reauth_hass.states.get("sensor.nocturne_cgm_status").state == STATE_UNAVAILABLE
 
 
 class TestSensorAge:

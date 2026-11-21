@@ -46,6 +46,7 @@ class TestSensorSetupEntry:
             "sensor.nocturne_pump_last_alert": STATE_UNAVAILABLE,
             "sensor.nocturne_cgm_battery": STATE_UNAVAILABLE,
             "sensor.nocturne_cgm_sensor_state": STATE_UNAVAILABLE,
+            "sensor.nocturne_cgm_status": STATE_UNAVAILABLE,
         }
 
         client.get_latest_aps_snapshot.return_value = ApsSnapshot(iob=2.5)
@@ -68,7 +69,7 @@ class TestSensorRegistration:
         devices = dr.async_get(reauth_hass)
         for entry in (first, second):
             registered = er.async_entries_for_config_entry(entities, entry.entry_id)
-            assert len(registered) == 23
+            assert len(registered) == 24
             assert all(e.unique_id.startswith(f"{entry.entry_id}_") for e in registered)
             hub = devices.async_get_device({(DOMAIN, entry.entry_id)})
             parts = [
